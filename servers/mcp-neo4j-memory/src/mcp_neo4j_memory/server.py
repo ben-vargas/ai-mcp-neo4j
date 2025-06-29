@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+import re
 from typing import Any, Dict, List, Optional, Literal
 
 import neo4j
@@ -20,6 +21,48 @@ from mcp.server.fastmcp import FastMCP
 # Set up logging
 logger = logging.getLogger('mcp_neo4j_memory')
 logger.setLevel(logging.INFO)
+
+# Security validation for Cypher injection prevention
+def validate_cypher_identifier(identifier: str, context: str = "identifier") -> str:
+    """
+    Validate and sanitize Cypher identifiers (node labels, relationship types, property names).
+    
+    Args:
+        identifier: The identifier to validate
+        context: Context for error messages
+        
+    Returns:
+        The validated identifier
+        
+    Raises:
+        ValueError: If the identifier is invalid or potentially malicious
+    """
+    if not identifier:
+        raise ValueError(f"Empty {context} not allowed")
+    
+    # Allow alphanumeric, underscore, and hyphen only
+    # Must start with letter or underscore
+    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_-]*$', identifier):
+        raise ValueError(f"Invalid {context} '{identifier}'. Only alphanumeric characters, underscores, and hyphens allowed, must start with letter or underscore")
+    
+    # Prevent reserved keywords and common injection patterns
+    reserved_keywords = {
+        'MATCH', 'CREATE', 'DELETE', 'SET', 'REMOVE', 'MERGE', 'WITH', 
+        'UNWIND', 'RETURN', 'WHERE', 'ORDER', 'LIMIT', 'SKIP', 'UNION',
+        'CALL', 'YIELD', 'LOAD', 'CSV', 'FOREACH', 'CASE', 'WHEN', 'THEN',
+        'ELSE', 'END', 'AND', 'OR', 'NOT', 'XOR', 'IN', 'STARTS', 'ENDS',
+        'CONTAINS', 'IS', 'NULL', 'TRUE', 'FALSE', 'DISTINCT', 'AS', 'ASC',
+        'DESC', 'ON', 'INDEX', 'CONSTRAINT', 'ASSERT', 'DROP', 'EXISTS'
+    }
+    
+    if identifier.upper() in reserved_keywords:
+        raise ValueError(f"Reserved keyword '{identifier}' not allowed as {context}")
+    
+    # Prevent excessively long identifiers
+    if len(identifier) > 64:
+        raise ValueError(f"{context} '{identifier}' too long (max 64 characters)")
+    
+    return identifier
 
 # Models for our knowledge graph
 class Entity(BaseModel):
@@ -113,11 +156,14 @@ class Neo4jMemory:
 
     async def create_entities(self, entities: List[Entity]) -> List[Entity]:
         for entity in entities:
+            # Validate entity type for Cypher injection prevention
+            validated_type = validate_cypher_identifier(entity.type, "entity type")
+            
             query = f"""
             WITH $entity as entity
             MERGE (e:Memory {{ name: entity.name }})
             SET e += entity {{ .type, .observations }}
-            SET e:{entity.type}
+            SET e:{validated_type}
             """
             self.neo4j_driver.execute_query(query, {"entity": entity.model_dump()})
 
@@ -125,12 +171,15 @@ class Neo4jMemory:
 
     async def create_relations(self, relations: List[Relation]) -> List[Relation]:
         for relation in relations:
+            # Validate relationship type for Cypher injection prevention
+            validated_rel_type = validate_cypher_identifier(relation.relationType, "relationship type")
+            
             query = f"""
             WITH $relation as relation
             MATCH (from:Memory),(to:Memory)
             WHERE from.name = relation.source
             AND  to.name = relation.target
-            MERGE (from)-[r:{relation.relationType}]->(to)
+            MERGE (from)-[r:{validated_rel_type}]->(to)
             """
             
             self.neo4j_driver.execute_query(
@@ -181,9 +230,12 @@ class Neo4jMemory:
 
     async def delete_relations(self, relations: List[Relation]) -> None:
         for relation in relations:
+            # Validate relationship type for Cypher injection prevention
+            validated_rel_type = validate_cypher_identifier(relation.relationType, "relationship type")
+            
             query = f"""
             WITH $relation as relation
-            MATCH (source:Memory)-[r:{relation.relationType}]->(target:Memory)
+            MATCH (source:Memory)-[r:{validated_rel_type}]->(target:Memory)
             WHERE source.name = relation.source
             AND target.name = relation.target
             DELETE r
