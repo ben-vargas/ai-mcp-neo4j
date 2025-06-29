@@ -282,4 +282,94 @@ Configure the server object in your `mcp_servers` array:
 
 Claude will include the bearer token on every request and pass the server's security checks.  See Anthropic docs on the MCP connector for details.  
 
+## 🌐 Exposing the server over HTTPS (production)
+
+FastMCP's built-in web runner is **HTTP-only**.  For production you terminate TLS in a reverse proxy that forwards requests to the container's internal port (`8000`).
+
+Below are turnkey recipes for the two most common choices.  In both cases make sure you forward the `Authorization` header so the bearer-token check works.
+
+### Option 1 — Nginx (Let's Encrypt / Certbot)
+
+1  Install Nginx & Certbot (or use the official docker image + `nginx-proxy-manager`).
+
+2  Create an upstream block pointing to the container:
+
+```nginx
+upstream mcp_neo4j_memory {
+    server 127.0.0.1:8000;   # container published port
+    keepalive 32;
+}
+
+server {
+    listen 443 ssl;
+    server_name neo4j.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/neo4j.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/neo4j.example.com/privkey.pem;
+
+    # Forward real client IP so rate-limiter sees it
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    location /mcp {
+        proxy_pass http://mcp_neo4j_memory;
+        proxy_set_header Host $host;
+        proxy_pass_request_headers on;           # keep Authorization header
+        proxy_http_version 1.1;                  # keeps SSE / streaming happy
+        proxy_buffering off;                     # stream responses immediately
+    }
+}
+```
+
+3  Reload Nginx and confirm `https://neo4j.example.com/mcp` returns the MCP `Initialize` result when called with your bearer header.
+
+### Option 2 — Caddy (automatic certificates)
+
+```caddyfile
+neo4j.example.com {
+    encode gzip
+    reverse_proxy /mcp* 127.0.0.1:8000 {
+        header_up Authorization {>Authorization}
+        header_up X-Forwarded-For {remote_host}
+    }
+}
+```
+
+Caddy will obtain and renew TLS certs automatically via Let's Encrypt.
+
+### Docker-Compose example (app + Caddy)
+
+```yaml
+version: "3.9"
+
+services:
+  memory:
+    image: mcp-neo4j-memory:latest      # build from repo
+    environment:
+      - MCP_TOKEN=${MCP_TOKEN}
+      - NEO4J_URL=${NEO4J_URL}
+      - NEO4J_USERNAME=${NEO4J_USERNAME}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+    command: >
+      mcp-neo4j-memory --transport http --host 0.0.0.0 --port 8000
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+
+volumes:
+  caddy_data:
+```
+
+Once the stack is up, visit `https://neo4j.example.com/mcp` with the bearer token header to verify.
+
+### Updating the Anthropic configuration
+
+Use the HTTPS URL in the `mcp_servers` array as previously shown—no further changes needed.
+
 ---
