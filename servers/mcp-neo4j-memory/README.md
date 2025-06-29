@@ -214,3 +214,72 @@ docker run -e NEO4J_URL="neo4j+s://xxxx.databases.neo4j.io" \
 ## 📄 License
 
 This MCP server is licensed under the MIT License. This means you are free to use, modify, and distribute the software, subject to the terms and conditions of the MIT License. For more details, please see the LICENSE file in the project repository.
+
+## 🔒 Authentication & Security
+
+Streamable-HTTP deployments **should always be protected** with a bearer token.  The server refuses requests whose header is not:
+
+```http
+Authorization: Bearer <YOUR_TOKEN>
+```
+
+### Choosing a token
+• Use at least **128 bits of entropy** (16 random bytes ⇒ 32 hex chars).
+• 256-bit tokens (64 hex chars) give more margin and are still short.
+• Avoid dictionary words.  Generate with one of:
+
+```bash
+# 128-bit hex
+openssl rand -hex 16            # 32-char token
+
+# 256-bit hex
+openssl rand -hex 32            # 64-char token
+
+# URL-safe base64
+python - <<'PY'
+import secrets, base64, os
+print(base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b'=')).decode()
+PY
+```
+
+### Enabling the token in the server
+Either pass the CLI flag or set the env-var:
+
+```bash
+export MCP_TOKEN="<YOUR_TOKEN>"
+
+mcp-neo4j-memory \
+  --transport http \
+  --token $MCP_TOKEN \
+  --host 0.0.0.0 --port 8000
+```
+
+### Origin allow-list (optional)
+Limit browser requests to specific origins:
+
+```bash
+export MCP_ALLOW_ORIGINS="https://app.example,https://claude.ai"
+```
+
+### Rate limiting (optional)
+Protect against brute-force and abuse:
+
+```bash
+export MCP_RATE_LIMIT="200/minute"   # SlowAPI syntax
+```
+
+### Using with Anthropic's MCP connector
+Configure the server object in your `mcp_servers` array:
+
+```json
+{
+  "type": "url",
+  "url": "https://neo4j.example.com/mcp",   // must be HTTPS
+  "name": "neo4j-memory",
+  "authorization_token": "<YOUR_TOKEN>"
+}
+```
+
+Claude will include the bearer token on every request and pass the server's security checks.  See Anthropic docs on the MCP connector for details.  
+
+---
