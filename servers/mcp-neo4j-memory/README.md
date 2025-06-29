@@ -323,6 +323,30 @@ server {
 
 3  Reload Nginx and confirm `https://neo4j.example.com/mcp` returns the MCP `Initialize` result when called with your bearer header.
 
+#### Using Certbot to obtain / renew the cert
+
+If you already have Nginx running on the host, the easiest flow is the **Certbot Nginx plugin** which edits the config and sets up renewal hooks automatically:
+
+```bash
+# Ubuntu / Debian
+sudo apt-get update && sudo apt-get install certbot python3-certbot-nginx
+
+# Obtain a certificate for the MCP domain (interactive prompts)
+sudo certbot --nginx -d neo4j.example.com
+
+# Dry-run renewal once to verify timers/hooks work
+sudo certbot renew --dry-run
+```
+
+Certbot will write the certificate and key to:
+```
++/etc/letsencrypt/live/neo4j.example.com/fullchain.pem
++/etc/letsencrypt/live/neo4j.example.com/privkey.pem
+```
+and insert an `include` block or `ssl_certificate` lines into your Nginx site file.  The sample Nginx snippet above already references those paths.
+
+Certificates renew automatically (twice-daily systemd timer); Nginx is reloaded by Certbot after each renewal so no manual action is required.
+
 ### Option 2 — Caddy (automatic certificates)
 
 ```caddyfile
