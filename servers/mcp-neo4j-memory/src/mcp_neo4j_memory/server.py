@@ -1,17 +1,14 @@
 import os
 import logging
 import json
-from typing import Any, Dict, List, Optional
-from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional, Literal
 
 import neo4j
 from neo4j import GraphDatabase
 from pydantic import BaseModel
 
 import mcp.types as types
-from mcp.server import NotificationOptions, Server
-from mcp.server.models import InitializationOptions
-import mcp.server.stdio
+from mcp.server.fastmcp import FastMCP
 
 # Set up logging
 logger = logging.getLogger('mcp_neo4j_memory')
@@ -198,7 +195,15 @@ class Neo4jMemory:
     async def find_nodes(self, names: List[str]) -> KnowledgeGraph:
         return await self.load_graph("name: (" + " ".join(names) + ")")
 
-async def main(neo4j_uri: str, neo4j_user: str, neo4j_password: str, neo4j_database: str):
+async def main(
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+    neo4j_database: str,
+    transport: Literal["stdio", "sse"] = "stdio",
+    host: str = "0.0.0.0",
+    port: int = 8000,
+):
     logger.info(f"Connecting to neo4j MCP Server with DB URL: {neo4j_uri}")
 
     # Connect to Neo4j
@@ -220,7 +225,7 @@ async def main(neo4j_uri: str, neo4j_user: str, neo4j_password: str, neo4j_datab
     memory = Neo4jMemory(neo4j_driver)
     
     # Create MCP server
-    server = Server("mcp-neo4j-memory")
+    server = FastMCP("mcp-neo4j-memory")
 
     # Register handlers
     @server.list_tools()
@@ -469,18 +474,15 @@ async def main(neo4j_uri: str, neo4j_user: str, neo4j_password: str, neo4j_datab
             logger.error(f"Error handling tool call: {e}")
             return [types.TextContent(type="text", text=f"Error: {str(e)}")]
 
-    # Start the server
-    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        logger.info("MCP Knowledge Graph Memory using Neo4j running on stdio")
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="mcp-neo4j-memory",
-                server_version="1.1",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
-        )
+    # Start the server using the selected transport
+    match transport:
+        case "stdio":
+            logger.info("MCP Knowledge Graph Memory using Neo4j running on stdio")
+            await server.run_stdio_async()
+        case "sse":
+            logger.info(
+                f"MCP Knowledge Graph Memory using Neo4j running via SSE on {host}:{port}"
+            )
+            await server.run_sse_async(host=host, port=port)
+        case _:
+            raise ValueError("Transport must be 'stdio' or 'sse'")
