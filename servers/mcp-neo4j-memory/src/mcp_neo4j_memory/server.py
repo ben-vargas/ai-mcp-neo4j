@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Literal
 import neo4j
 from neo4j import GraphDatabase
 from pydantic import BaseModel
+import asyncio
+import typer
 
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
@@ -486,3 +488,33 @@ async def main(
             await server.run_sse_async(host=host, port=port)
         case _:
             raise ValueError("Transport must be 'stdio' or 'sse'")
+
+app = typer.Typer(help="MCP Neo4j Memory Server")
+
+
+@app.command()
+def cli(
+    db_url: str = typer.Option(..., "--db-url", envvar="NEO4J_URL", help="Neo4j Bolt URL"),
+    username: str = typer.Option(..., "--username", envvar="NEO4J_USERNAME", help="Neo4j username"),
+    password: str = typer.Option(..., "--password", envvar="NEO4J_PASSWORD", help="Neo4j password"),
+    database: str = typer.Option("neo4j", "--database", envvar="NEO4J_DATABASE", help="Neo4j database"),
+    transport: str = typer.Option("stdio", "--transport", envvar="MCP_TRANSPORT", help="Transport mode: stdio or sse"),
+    host: str = typer.Option("0.0.0.0", "--host", envvar="HOST", help="Host for SSE"),
+    port: int = typer.Option(8000, "--port", envvar="PORT", help="Port for SSE"),
+):
+    """Entry point called by the console script."""
+    asyncio.run(
+        main(
+            neo4j_uri=db_url,
+            neo4j_user=username,
+            neo4j_password=password,
+            neo4j_database=database,
+            transport=transport,
+            host=host,
+            port=port,
+        )
+    )
+
+
+if __name__ == "__main__":
+    app()

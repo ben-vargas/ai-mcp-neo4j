@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir hatchling
 COPY pyproject.toml /app/
 
 # Install runtime dependencies
-RUN pip install --no-cache-dir mcp>=1.6.0 neo4j>=5.26.0 pydantic>=2.6.0
+RUN pip install --no-cache-dir mcp>=1.6.0 neo4j>=5.26.0 pydantic>=2.6.0 typer[all]>=0.12.3
 
 # Copy the source code
 COPY src/ /app/src/
