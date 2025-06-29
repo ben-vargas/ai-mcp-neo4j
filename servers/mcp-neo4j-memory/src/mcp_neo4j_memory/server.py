@@ -202,7 +202,7 @@ async def main(
     neo4j_user: str,
     neo4j_password: str,
     neo4j_database: str,
-    transport: Literal["stdio", "sse"] = "stdio",
+    transport: Literal["stdio", "sse", "http"] = "stdio",
     host: str = "0.0.0.0",
     port: int = 8000,
 ):
@@ -477,17 +477,23 @@ async def main(
             return [types.TextContent(type="text", text=f"Error: {str(e)}")]
 
     # Start the server using the selected transport
-    match transport:
-        case "stdio":
-            logger.info("MCP Knowledge Graph Memory using Neo4j running on stdio")
-            await server.run_stdio_async()
-        case "sse":
+    if transport == "stdio":
+        logger.info("MCP Knowledge Graph Memory using Neo4j running on stdio")
+        await server.run_stdio_async()
+    elif transport in {"sse", "http"}:
+        # Prefer the new HTTP transport if available, otherwise fall back to SSE
+        if transport == "http" and hasattr(server, "run_http_async"):
             logger.info(
-                f"MCP Knowledge Graph Memory using Neo4j running via SSE on {host}:{port}"
+                f"MCP Knowledge Graph Memory using Neo4j running via Streamable HTTP on {host}:{port}"
+            )
+            await server.run_http_async(host=host, port=port)
+        else:
+            logger.warning(
+                "Using deprecated SSE transport; consider upgrading client and server to Streamable HTTP as per MCP spec 2025-03-26"
             )
             await server.run_sse_async(host=host, port=port)
-        case _:
-            raise ValueError("Transport must be 'stdio' or 'sse'")
+    else:
+        raise ValueError("Transport must be 'stdio', 'http', or 'sse'")
 
 app = typer.Typer(help="MCP Neo4j Memory Server")
 
@@ -498,7 +504,7 @@ def cli(
     username: str = typer.Option(..., "--username", envvar="NEO4J_USERNAME", help="Neo4j username"),
     password: str = typer.Option(..., "--password", envvar="NEO4J_PASSWORD", help="Neo4j password"),
     database: str = typer.Option("neo4j", "--database", envvar="NEO4J_DATABASE", help="Neo4j database"),
-    transport: str = typer.Option("stdio", "--transport", envvar="MCP_TRANSPORT", help="Transport mode: stdio or sse"),
+    transport: str = typer.Option("stdio", "--transport", envvar="MCP_TRANSPORT", help="Transport mode: stdio, http (streamable HTTP), or sse (deprecated)"),
     host: str = typer.Option("0.0.0.0", "--host", envvar="HOST", help="Host for SSE"),
     port: int = typer.Option(8000, "--port", envvar="PORT", help="Port for SSE"),
 ):
