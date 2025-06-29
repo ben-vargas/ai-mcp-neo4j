@@ -8,6 +8,8 @@ from neo4j import GraphDatabase
 from pydantic import BaseModel
 import asyncio
 import typer
+from fastapi import Request, HTTPException, status
+from starlette.middleware.base import BaseHTTPMiddleware
 
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
@@ -202,9 +204,10 @@ async def main(
     neo4j_user: str,
     neo4j_password: str,
     neo4j_database: str,
-    transport: Literal["stdio", "http"] = "stdio",
+    transport: Literal["stdio", "http"],
     host: str = "0.0.0.0",
     port: int = 8000,
+    token: str | None = None,
 ):
     logger.info(f"Connecting to neo4j MCP Server with DB URL: {neo4j_uri}")
 
@@ -486,6 +489,19 @@ async def main(
         logger.info(
             f"MCP Knowledge Graph Memory using Neo4j running via Streamable HTTP on {host}:{port}"
         )
+        # Attach bearer-token middleware if a token is supplied
+        expected_token = token or os.getenv("MCP_TOKEN")
+        if expected_token:
+            app = server.asgi_app  # ensure FastAPI app exists
+
+            async def auth_middleware(request: Request, call_next):
+                auth_header = request.headers.get("Authorization")
+                if auth_header != f"Bearer {expected_token}":
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+                return await call_next(request)
+
+            app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
+
         await server.run_http_async(host=host, port=port)
     else:
         raise ValueError("Transport must be 'stdio' or 'http'")
@@ -502,6 +518,7 @@ def cli(
     transport: str = typer.Option("stdio", "--transport", envvar="MCP_TRANSPORT", help="Transport mode: stdio or http (streamable HTTP)"),
     host: str = typer.Option("127.0.0.1", "--host", envvar="HOST", help="Bind host for HTTP transport"),
     port: int = typer.Option(8000, "--port", envvar="PORT", help="Port for HTTP transport"),
+    token: str | None = typer.Option(None, "--token", envvar="MCP_TOKEN", help="Bearer token required in Authorization header for HTTP transport"),
 ):
     """Entry point called by the console script."""
     asyncio.run(
@@ -513,6 +530,7 @@ def cli(
             transport=transport,
             host=host,
             port=port,
+            token=token,
         )
     )
 

@@ -8,6 +8,8 @@ dependencies = [
     "mcp>=1.6.0",
     "neo4j>=5.26.0",
     "pydantic>=2.6.0",
+    "fastapi>=0.111.0",
+    "starlette>=0.36.0",
     "typer[all]>=0.12.3",
 ]
 
