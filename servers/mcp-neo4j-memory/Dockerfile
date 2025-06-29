@@ -24,7 +24,7 @@ ENV NEO4J_URL="bolt://host.docker.internal:7687"
 ENV NEO4J_USERNAME="neo4j"
 ENV NEO4J_PASSWORD="password"
 
-# Expose default SSE port (optional)
+# Expose default HTTP port
 EXPOSE 8000
 
 # Command to run the server using the package entry point (stdio by default)

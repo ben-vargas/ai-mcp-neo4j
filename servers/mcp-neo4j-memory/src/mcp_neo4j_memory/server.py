@@ -202,7 +202,7 @@ async def main(
     neo4j_user: str,
     neo4j_password: str,
     neo4j_database: str,
-    transport: Literal["stdio", "sse", "http"] = "stdio",
+    transport: Literal["stdio", "http"] = "stdio",
     host: str = "0.0.0.0",
     port: int = 8000,
 ):
@@ -480,20 +480,15 @@ async def main(
     if transport == "stdio":
         logger.info("MCP Knowledge Graph Memory using Neo4j running on stdio")
         await server.run_stdio_async()
-    elif transport in {"sse", "http"}:
-        # Prefer the new HTTP transport if available, otherwise fall back to SSE
-        if transport == "http" and hasattr(server, "run_http_async"):
-            logger.info(
-                f"MCP Knowledge Graph Memory using Neo4j running via Streamable HTTP on {host}:{port}"
-            )
-            await server.run_http_async(host=host, port=port)
-        else:
-            logger.warning(
-                "Using deprecated SSE transport; consider upgrading client and server to Streamable HTTP as per MCP spec 2025-03-26"
-            )
-            await server.run_sse_async(host=host, port=port)
+    elif transport == "http":
+        if not hasattr(server, "run_http_async"):
+            raise RuntimeError("Installed mcp package does not support run_http_async(). Please upgrade mcp>=1.7.0 that implements Streamable HTTP transport.")
+        logger.info(
+            f"MCP Knowledge Graph Memory using Neo4j running via Streamable HTTP on {host}:{port}"
+        )
+        await server.run_http_async(host=host, port=port)
     else:
-        raise ValueError("Transport must be 'stdio', 'http', or 'sse'")
+        raise ValueError("Transport must be 'stdio' or 'http'")
 
 app = typer.Typer(help="MCP Neo4j Memory Server")
 
@@ -504,9 +499,9 @@ def cli(
     username: str = typer.Option(..., "--username", envvar="NEO4J_USERNAME", help="Neo4j username"),
     password: str = typer.Option(..., "--password", envvar="NEO4J_PASSWORD", help="Neo4j password"),
     database: str = typer.Option("neo4j", "--database", envvar="NEO4J_DATABASE", help="Neo4j database"),
-    transport: str = typer.Option("stdio", "--transport", envvar="MCP_TRANSPORT", help="Transport mode: stdio, http (streamable HTTP), or sse (deprecated)"),
-    host: str = typer.Option("0.0.0.0", "--host", envvar="HOST", help="Host for SSE"),
-    port: int = typer.Option(8000, "--port", envvar="PORT", help="Port for SSE"),
+    transport: str = typer.Option("stdio", "--transport", envvar="MCP_TRANSPORT", help="Transport mode: stdio or http (streamable HTTP)"),
+    host: str = typer.Option("127.0.0.1", "--host", envvar="HOST", help="Bind host for HTTP transport"),
+    port: int = typer.Option(8000, "--port", envvar="PORT", help="Port for HTTP transport"),
 ):
     """Entry point called by the console script."""
     asyncio.run(
