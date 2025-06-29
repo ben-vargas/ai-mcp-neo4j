@@ -10,6 +10,9 @@ import asyncio
 import typer
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
 
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
@@ -208,6 +211,8 @@ async def main(
     host: str = "0.0.0.0",
     port: int = 8000,
     token: str | None = None,
+    allow_origins: str | None = None,  # comma-separated list
+    rate_limit: str | None = None,  # e.g., "100/minute"
 ):
     logger.info(f"Connecting to neo4j MCP Server with DB URL: {neo4j_uri}")
 
@@ -490,10 +495,11 @@ async def main(
             f"MCP Knowledge Graph Memory using Neo4j running via Streamable HTTP on {host}:{port}"
         )
         # Attach bearer-token middleware if a token is supplied
+        app = server.asgi_app  # ensure FastAPI app exists
+
+        # Bearer-token auth
         expected_token = token or os.getenv("MCP_TOKEN")
         if expected_token:
-            app = server.asgi_app  # ensure FastAPI app exists
-
             async def auth_middleware(request: Request, call_next):
                 auth_header = request.headers.get("Authorization")
                 if auth_header != f"Bearer {expected_token}":
@@ -501,6 +507,28 @@ async def main(
                 return await call_next(request)
 
             app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
+
+        # Optional Origin allow-list
+        origins_raw = allow_origins or os.getenv("MCP_ALLOW_ORIGINS")
+        allowed_origins_set = {
+            o.strip().lower() for o in origins_raw.split(",") if o.strip()
+        } if origins_raw else set()
+
+        if allowed_origins_set:
+            async def origin_middleware(request: Request, call_next):
+                origin = (request.headers.get("origin") or "").lower()
+                if origin and origin not in allowed_origins_set:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Origin not allowed")
+                return await call_next(request)
+
+            app.add_middleware(BaseHTTPMiddleware, dispatch=origin_middleware)
+
+        # Optional rate limiting
+        rl_value = rate_limit or os.getenv("MCP_RATE_LIMIT")  # e.g., "60/minute"
+        if rl_value:
+            limiter = Limiter(key_func=get_remote_address, default_limits=[rl_value])
+            app.state.limiter = limiter
+            app.add_middleware(SlowAPIMiddleware)
 
         await server.run_http_async(host=host, port=port)
     else:
@@ -519,6 +547,8 @@ def cli(
     host: str = typer.Option("127.0.0.1", "--host", envvar="HOST", help="Bind host for HTTP transport"),
     port: int = typer.Option(8000, "--port", envvar="PORT", help="Port for HTTP transport"),
     token: str | None = typer.Option(None, "--token", envvar="MCP_TOKEN", help="Bearer token required in Authorization header for HTTP transport"),
+    allow_origins: str | None = typer.Option(None, "--allow-origins", envvar="MCP_ALLOW_ORIGINS", help="Comma-separated list of allowed Origin headers"),
+    rate_limit: str | None = typer.Option(None, "--rate-limit", envvar="MCP_RATE_LIMIT", help="SlowAPI rate limit string, e.g. '100/minute'"),
 ):
     """Entry point called by the console script."""
     asyncio.run(
@@ -531,6 +561,8 @@ def cli(
             host=host,
             port=port,
             token=token,
+            allow_origins=allow_origins,
+            rate_limit=rate_limit,
         )
     )
 
